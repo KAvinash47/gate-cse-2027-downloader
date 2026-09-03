@@ -16,12 +16,12 @@ from telethon.errors import FloodWaitError, RpcCallFailError, RPCError
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
-API_ID = int(os.environ.get('TG_API_ID', '38656404'))
-API_HASH = os.environ.get('TG_API_HASH', 'f2cd910275c392039b0864c1dadd47f2')
+API_ID = int(os.environ.get('TG_API_ID') or 38656404)
+API_HASH = os.environ.get('TG_API_HASH') or 'f2cd910275c392039b0864c1dadd47f2'
 SESSION_STRING = os.environ.get('TG_SESSION_STRING')
-GROUP_ID = int(os.environ.get('TG_GROUP_ID', '-1003610973355'))
+GROUP_ID = int(os.environ.get('TG_GROUP_ID') or -1003610973355)
 GDRIVE_REFRESH_TOKEN = os.environ.get('GDRIVE_REFRESH_TOKEN') or '1//04nTXLe2hpcf0CgYIARAAGAQSNwF-L9IrQRppSJ4V-6shAUt9Tf954Z3XzJ4biS-ISBicgUa-50BZZ6vcuimmxW-XrClKH0sXu9E'
-ROOT_FOLDER_ID = os.environ.get('GDRIVE_ROOT_FOLDER_ID', '1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC')
+ROOT_FOLDER_ID = os.environ.get('GDRIVE_ROOT_FOLDER_ID') or '1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC'
 
 CONCURRENT_WORKERS = 1  # 1 dedicated sequential worker guarantees 0 flood-wait & maximum Telegram bandwidth
 TEMP_DOWNLOAD_DIR = '/tmp/tg_downloads' if os.name != 'nt' else 'C:\\temp\\tg_downloads'
