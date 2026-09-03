@@ -18,7 +18,7 @@ sys.stderr.reconfigure(line_buffering=True)
 
 API_ID = 38656404
 API_HASH = "f2cd910275c392039b0864c1dadd47f2"
-SESSION_STRING = os.environ.get('TG_SESSION_STRING')
+SESSION_STRING = os.environ.get('TG_SESSION_STRING') or "1BVtsOK8BuxqCUIwrv4_q0RygppL9Z7EgUe9pz6ar-FMmOJqEgx1zngy_d58PMIDIZrnQm-pWvCucreCI2Cg86ivfBq4q9hPHHb3plA2nKm2x-o9zt-VKxlEmM5rJC8vj8XVm75KnwPR394Ry1HoedG7hmt6DAAEEXsqBxE6OGC_SIOoYPKJ842PaPAQnHj5yaxxgAIG0-Dr5quwO7OISkQtMNsXiKMwvxNXZzPt5HWUcHaSbwa_JouN7Ay4ffCzTsYkmyPMQGmlwCO0cdbrcLqhnIIKsNruQFW3OWWUGr4G1vpYYQjHgBREUnJhQ_v9tL_8oNHunPK37b2Yc1IVzwR9CJv5mt9w="
 GROUP_ID = -1003610973355
 GDRIVE_REFRESH_TOKEN = "1//04nTXLe2hpcf0CgYIARAAGAQSNwF-L9IrQRppSJ4V-6shAUt9Tf954Z3XzJ4biS-ISBicgUa-50BZZ6vcuimmxW-XrClKH0sXu9E"
 ROOT_FOLDER_ID = "1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC"
@@ -183,10 +183,6 @@ async def run():
     start_time = time.time()
     os.makedirs(TEMP_DOWNLOAD_DIR, exist_ok=True)
     
-    if not SESSION_STRING:
-        print("❌ Missing TG_SESSION_STRING environment variable!", flush=True)
-        sys.exit(1)
-        
     gdrive = GoogleDriveManager(GDRIVE_REFRESH_TOKEN, ROOT_FOLDER_ID)
     
     # Initialize Telethon with automatic 120s flood sleep handling
