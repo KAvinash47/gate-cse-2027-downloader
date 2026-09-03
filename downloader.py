@@ -20,7 +20,7 @@ API_ID = 38656404
 API_HASH = "f2cd910275c392039b0864c1dadd47f2"
 SESSION_STRING = os.environ.get('TG_SESSION_STRING') or "1BVtsOK8BuzSacJ1ukb94zzaRtQjlKX1KHOCXzYe7iZtqCjES8GPNAc3pr81ZyN0fumPpRUYpQgIZCVMDePfwu5gbFGsHyLYPx-EXIn0bgwSUUwFeBcpAf3n486bkFB60ir8i0y_APLorUYEyPBKTal2922cfdzsr34nBJDeck8QEvUIS1PsBMXBiX079-eujqWJysU8ci-19lEhUYXejREU3M3hVQcocyRWOu8JQoym_s1XIeOioVnjO3CAWKZ6av2to5RTemmPrPX7kyywXnzu47FS7p-yEhov83mcgA59nOftoU0g0jsltFEuUuGKTViwoElsZ8lvMmi4aXEDBq50NPamL1cs="
 GROUP_ID = -1003610973355
-GDRIVE_REFRESH_TOKEN = "1//04nTXLe2hpcf0CgYIARAAGAQSNwF-L9IrQRppSJ4V-6shAUt9Tf954Z3XzJ4biS-ISBicgUa-50BZZ6vcuimmxW-XrClKH0sXu9E"
+GDRIVE_REFRESH_TOKEN = os.environ.get('GDRIVE_REFRESH_TOKEN')
 ROOT_FOLDER_ID = "1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC"
 
 TEMP_DOWNLOAD_DIR = '/tmp/tg_downloads' if os.name != 'nt' else 'C:\\temp\\tg_downloads'
@@ -124,6 +124,14 @@ class GoogleDriveManager:
         }
         metadata = {"name": file_name, "parents": [folder_id]}
         init_res = self.session.post(init_url, headers=init_headers, json=metadata, timeout=45)
+        
+        # Auto refresh if expired
+        if init_res.status_code == 401:
+            self._refresh_token()
+            headers = self.get_auth_header()
+            init_headers["Authorization"] = headers["Authorization"]
+            init_res = self.session.post(init_url, headers=init_headers, json=metadata, timeout=45)
+            
         if init_res.status_code != 200:
             raise RuntimeError(f"Failed to initiate resumable upload: {init_res.text}")
         

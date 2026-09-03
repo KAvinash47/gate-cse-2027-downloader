@@ -34,5 +34,6 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
         run: |
           python -u downloader.py
