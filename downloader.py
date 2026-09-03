@@ -159,7 +159,11 @@ def clean_name(name):
     return re.sub(r'[\\/*?:"<>|]', '_', str(name))
 
 async def download_media_resumable(client, msg, temp_path, expected_size):
-    """Download Telegram file chunk-by-chunk with automatic resume from partial byte offset."""
+    """Download Telegram file chunk-by-chunk with automatic resume and auto-reconnect."""
+    if not client.is_connected():
+        print("🔄 Reconnecting Telegram MTProto socket...", flush=True)
+        await client.connect()
+
     current_size = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
     if current_size == expected_size and expected_size > 0:
         return True
@@ -242,7 +246,7 @@ async def run():
         temp_path = os.path.join(TEMP_DOWNLOAD_DIR, f"temp_{clean_name(fname)}")
         success = False
         
-        for attempt in range(10):
+        for attempt in range(15):
             try:
                 ok = await download_media_resumable(client, msg, temp_path, file_size)
                 if ok:
@@ -276,7 +280,13 @@ async def run():
                 print(f"⏳ Telegram rate pause ({wait_sec}s), sleeping before resume...", flush=True)
                 await asyncio.sleep(wait_sec + 2)
             except Exception as e:
-                print(f"⚠️ Retry {attempt+1}/10 on {fname}: {e}", flush=True)
+                print(f"⚠️ Retry {attempt+1}/15 on {fname}: {e}", flush=True)
+                if not client.is_connected():
+                    try:
+                        print("🔄 Reconnecting Telegram MTProto socket...", flush=True)
+                        await client.connect()
+                    except Exception:
+                        pass
                 await asyncio.sleep(4)
             finally:
                 if success and os.path.exists(temp_path):
