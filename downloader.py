@@ -10,7 +10,7 @@ from urllib3.util.retry import Retry
 from telethon import TelegramClient, functions
 from telethon.sessions import StringSession
 from telethon.tl.types import MessageService
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, RpcCallFailError
 
 # Force unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
@@ -23,7 +23,7 @@ GROUP_ID = int(os.environ.get('TG_GROUP_ID', '-1003610973355'))
 GDRIVE_REFRESH_TOKEN = os.environ.get('GDRIVE_REFRESH_TOKEN')
 ROOT_FOLDER_ID = os.environ.get('GDRIVE_ROOT_FOLDER_ID', '1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC')
 
-CONCURRENT_WORKERS = 3
+CONCURRENT_WORKERS = 2  # Optimal sweet spot for non-premium Telegram accounts
 TEMP_DOWNLOAD_DIR = '/tmp/tg_downloads' if os.name != 'nt' else 'C:\\temp\\tg_downloads'
 MAX_JOB_DURATION_SEC = 5 * 3600 + 15 * 60  # 5 hours 15 mins (safely under 6 hr limit)
 
@@ -189,7 +189,10 @@ async def worker(worker_id, queue, client, gdrive, stats, sem, start_time):
             
             temp_path = os.path.join(TEMP_DOWNLOAD_DIR, f"w{worker_id}_{fname}")
             if os.path.exists(temp_path):
-                os.remove(temp_path)
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
                 
             success = False
             for attempt in range(5):
@@ -214,10 +217,13 @@ async def worker(worker_id, queue, client, gdrive, stats, sem, start_time):
                         break
                 except FloodWaitError as e:
                     print(f"⏳ [W{worker_id}] FloodWait: waiting {e.seconds}s...", flush=True)
-                    await asyncio.sleep(e.seconds)
+                    await asyncio.sleep(e.seconds + 2)
+                except RpcCallFailError as e:
+                    print(f"⚠️ [W{worker_id}] Telegram server hiccup ({e}), waiting 5s before retry...", flush=True)
+                    await asyncio.sleep(5)
                 except Exception as e:
                     print(f"⚠️ [W{worker_id}] Retry {attempt+1} on {fname}: {e}", flush=True)
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(3)
                 finally:
                     if success and os.path.exists(temp_path):
                         try:
