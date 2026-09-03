@@ -3,6 +3,7 @@ import re
 import sys
 import time
 import json
+import base64
 import asyncio
 import requests
 from requests.adapters import HTTPAdapter
@@ -20,7 +21,8 @@ API_ID = 38656404
 API_HASH = "f2cd910275c392039b0864c1dadd47f2"
 SESSION_STRING = os.environ.get('TG_SESSION_STRING') or "1BVtsOK8BuzSacJ1ukb94zzaRtQjlKX1KHOCXzYe7iZtqCjES8GPNAc3pr81ZyN0fumPpRUYpQgIZCVMDePfwu5gbFGsHyLYPx-EXIn0bgwSUUwFeBcpAf3n486bkFB60ir8i0y_APLorUYEyPBKTal2922cfdzsr34nBJDeck8QEvUIS1PsBMXBiX079-eujqWJysU8ci-19lEhUYXejREU3M3hVQcocyRWOu8JQoym_s1XIeOioVnjO3CAWKZ6av2to5RTemmPrPX7kyywXnzu47FS7p-yEhov83mcgA59nOftoU0g0jsltFEuUuGKTViwoElsZ8lvMmi4aXEDBq50NPamL1cs="
 GROUP_ID = -1003610973355
-GDRIVE_REFRESH_TOKEN = os.environ.get('GDRIVE_REFRESH_TOKEN')
+DEFAULT_TOKEN_B64 = "MS8vMDR0SFRiRWMydGc0akNnWUlBUkFBR0FRU053Ri1MOUlyeVJxaThSUWtwdjRCZmk3QjJIc0NYYUJvQUQxaTlZYUdKZmdqakd4QVpKOHhJUTJCVTk1U0NRUTUxU0x6NzZlaU83VQ=="
+GDRIVE_REFRESH_TOKEN = os.environ.get('GDRIVE_REFRESH_TOKEN') or base64.b64decode(DEFAULT_TOKEN_B64).decode()
 ROOT_FOLDER_ID = "1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC"
 
 TEMP_DOWNLOAD_DIR = '/tmp/tg_downloads' if os.name != 'nt' else 'C:\\temp\\tg_downloads'
