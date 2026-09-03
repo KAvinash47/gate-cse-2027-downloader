@@ -23,7 +23,6 @@ GROUP_ID = -1003610973355
 GDRIVE_REFRESH_TOKEN = "1//04nTXLe2hpcf0CgYIARAAGAQSNwF-L9IrQRppSJ4V-6shAUt9Tf954Z3XzJ4biS-ISBicgUa-50BZZ6vcuimmxW-XrClKH0sXu9E"
 ROOT_FOLDER_ID = "1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC"
 
-CONCURRENT_WORKERS = 1  # 1 dedicated sequential worker guarantees 0 flood-wait & maximum Telegram bandwidth
 TEMP_DOWNLOAD_DIR = '/tmp/tg_downloads' if os.name != 'nt' else 'C:\\temp\\tg_downloads'
 MAX_JOB_DURATION_SEC = 5 * 3600 + 15 * 60  # 5 hours 15 mins (safely under 6 hr limit)
 
@@ -159,94 +158,22 @@ class GoogleDriveManager:
 def clean_name(name):
     return re.sub(r'[\\/*?:"<>|]', '_', str(name))
 
-def parse_flood_wait(error_str):
-    match = re.search(r'WAIT_(\\d+)', error_str)
-    if match:
-        return int(match.group(1))
-    return 5
+async def download_media_resumable(client, msg, temp_path, expected_size):
+    """Download Telegram file chunk-by-chunk with automatic resume from partial byte offset."""
+    current_size = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
+    if current_size == expected_size and expected_size > 0:
+        return True
 
-async def worker(worker_id, queue, client, gdrive, stats, sem, start_time):
-    while not queue.empty():
-        if (time.time() - start_time) > MAX_JOB_DURATION_SEC:
-            break
+    # If file was partially downloaded, resume from current_size
+    mode = "ab" if current_size > 0 else "wb"
+    if current_size > 0:
+        print(f"  🔁 Resuming download from offset {current_size / (1024*1024):.1f} MB...", flush=True)
+
+    with open(temp_path, mode) as f:
+        async for chunk in client.iter_download(msg.media, offset=current_size, request_size=524288):
+            f.write(chunk)
             
-        try:
-            item_idx, total_items, msg, topic_name, folder_id = queue.get_nowait()
-        except asyncio.QueueEmpty:
-            break
-            
-        fname = getattr(msg.file, 'name', None)
-        if not fname:
-            ext = getattr(msg.file, 'ext', '.bin')
-            fname = f"msg_{msg.id}{ext}"
-        fname = clean_name(fname)
-        file_size = getattr(msg.file, 'size', 0)
-        
-        if gdrive.file_exists(folder_id, fname, file_size):
-            stats["skipped"] += 1
-            print(f"⏩ [{item_idx}/{total_items}] [EXISTS]: {topic_name}/{fname}", flush=True)
-            queue.task_done()
-            continue
-            
-        async with sem:
-            mb = file_size / (1024 * 1024)
-            print(f"\n⬇️ [{item_idx}/{total_items}] [DOWNLOADING ({mb:.1f} MB)]: {topic_name}/{fname}", flush=True)
-            t0 = time.time()
-            
-            temp_path = os.path.join(TEMP_DOWNLOAD_DIR, f"temp_{clean_name(fname)}")
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
-                
-            success = False
-            for attempt in range(15):
-                try:
-                    await msg.download_media(file=temp_path)
-                    if os.path.exists(temp_path) and os.path.getsize(temp_path) == file_size:
-                        t_down = time.time() - t0
-                        spd_down = mb / t_down if t_down > 0 else 0
-                        print(f"  ⚡ Downloaded ({mb:.1f} MB in {t_down:.1f}s @ {spd_down:.2f} MB/s)", flush=True)
-                        
-                        # Resumable Stream to Google Drive
-                        t_up0 = time.time()
-                        print(f"  ☁️ Uploading to Google Drive ({topic_name})...", flush=True)
-                        gdrive.upload_file_resumable(temp_path, fname, folder_id, file_size)
-                        t_up = time.time() - t_up0
-                        spd_up = mb / t_up if t_up > 0 else 0
-                        
-                        stats["saved"] += 1
-                        stats["bytes"] += file_size
-                        print(f"✅ [SAVED TO GDRIVE]: {topic_name}/{fname} (Up: {t_up:.1f}s @ {spd_up:.2f} MB/s)", flush=True)
-                        success = True
-                        break
-                    else:
-                        print(f"⚠️ Partial download ({os.path.getsize(temp_path) if os.path.exists(temp_path) else 0}/{file_size} bytes), retrying...", flush=True)
-                        await asyncio.sleep(2)
-                except FloodWaitError as e:
-                    print(f"⏳ Telegram FloodWait ({e.seconds}s), sleeping...", flush=True)
-                    await asyncio.sleep(e.seconds + 2)
-                except RPCError as e:
-                    err_str = str(e)
-                    if "FLOOD" in err_str or "WAIT" in err_str:
-                        wait_sec = parse_flood_wait(err_str)
-                        print(f"⏳ Telegram rate pause ({wait_sec}s), waiting before retry...", flush=True)
-                        await asyncio.sleep(wait_sec + 2)
-                    else:
-                        print(f"⚠️ Telegram RPC error ({e}), waiting 5s...", flush=True)
-                        await asyncio.sleep(5)
-                except Exception as e:
-                    print(f"⚠️ Retry {attempt+1}/15 on {fname}: {e}", flush=True)
-                    await asyncio.sleep(3)
-                finally:
-                    if success and os.path.exists(temp_path):
-                        try:
-                            os.remove(temp_path)
-                        except Exception:
-                            pass
-                            
-        queue.task_done()
+    return os.path.exists(temp_path) and os.path.getsize(temp_path) == expected_size
 
 async def run():
     start_time = time.time()
@@ -257,7 +184,9 @@ async def run():
         sys.exit(1)
         
     gdrive = GoogleDriveManager(GDRIVE_REFRESH_TOKEN, ROOT_FOLDER_ID)
-    client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+    
+    # Initialize Telethon with automatic 120s flood sleep handling
+    client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, flood_sleep_threshold=120)
     await client.connect()
     
     entity = await client.get_entity(GROUP_ID)
@@ -285,23 +214,80 @@ async def run():
         print(f"  📁 {clean_topic}: {count} media queued", flush=True)
         
     print(f"\n🔥 TOTAL QUEUED IN COURSE: {len(all_files)} files", flush=True)
-    print(f"⚡ Starting {CONCURRENT_WORKERS} Dedicated Stream directly to Google Drive...\n", flush=True)
+    print("⚡ Starting Resilient Telegram ➔ Google Drive Pipeline...\n", flush=True)
     
-    queue = asyncio.Queue()
-    for i, (msg, topic_name, folder_id) in enumerate(all_files, 1):
-        queue.put_nowait((i, len(all_files), msg, topic_name, folder_id))
-        
     stats = {"saved": 0, "skipped": 0, "bytes": 0}
-    sem = asyncio.Semaphore(CONCURRENT_WORKERS)
     
-    workers = [
-        asyncio.create_task(worker(w_id, queue, client, gdrive, stats, sem, start_time))
-        for w_id in range(1, CONCURRENT_WORKERS + 1)
-    ]
-    
-    await queue.join()
-    await asyncio.gather(*workers)
-    
+    for item_idx, (msg, topic_name, folder_id) in enumerate(all_files, 1):
+        if (time.time() - start_time) > MAX_JOB_DURATION_SEC:
+            print("\n⏰ Reached maximum 5-hour batch window, ending gracefully...", flush=True)
+            break
+            
+        fname = getattr(msg.file, 'name', None)
+        if not fname:
+            ext = getattr(msg.file, 'ext', '.bin')
+            fname = f"msg_{msg.id}{ext}"
+        fname = clean_name(fname)
+        file_size = getattr(msg.file, 'size', 0)
+        
+        if gdrive.file_exists(folder_id, fname, file_size):
+            stats["skipped"] += 1
+            print(f"⏩ [{item_idx}/{len(all_files)}] [EXISTS]: {topic_name}/{fname}", flush=True)
+            continue
+            
+        mb = file_size / (1024 * 1024)
+        print(f"\n⬇️ [{item_idx}/{len(all_files)}] [DOWNLOADING ({mb:.1f} MB)]: {topic_name}/{fname}", flush=True)
+        t0 = time.time()
+        
+        temp_path = os.path.join(TEMP_DOWNLOAD_DIR, f"temp_{clean_name(fname)}")
+        success = False
+        
+        for attempt in range(10):
+            try:
+                ok = await download_media_resumable(client, msg, temp_path, file_size)
+                if ok:
+                    t_down = time.time() - t0
+                    spd_down = mb / t_down if t_down > 0 else 0
+                    print(f"  ⚡ Downloaded ({mb:.1f} MB in {t_down:.1f}s @ {spd_down:.2f} MB/s)", flush=True)
+                    
+                    # Resumable Stream to Google Drive
+                    t_up0 = time.time()
+                    print(f"  ☁️ Uploading to Google Drive ({topic_name})...", flush=True)
+                    gdrive.upload_file_resumable(temp_path, fname, folder_id, file_size)
+                    t_up = time.time() - t_up0
+                    spd_up = mb / t_up if t_up > 0 else 0
+                    
+                    stats["saved"] += 1
+                    stats["bytes"] += file_size
+                    print(f"✅ [SAVED TO GDRIVE]: {topic_name}/{fname} (Up: {t_up:.1f}s @ {spd_up:.2f} MB/s)", flush=True)
+                    success = True
+                    break
+                else:
+                    cur_sz = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
+                    print(f"⚠️ Partial download ({cur_sz}/{file_size} bytes), resuming in 3s...", flush=True)
+                    await asyncio.sleep(3)
+            except FloodWaitError as e:
+                print(f"⏳ FloodWait ({e.seconds}s), sleeping before resume...", flush=True)
+                await asyncio.sleep(e.seconds + 2)
+            except RPCError as e:
+                err_str = str(e)
+                wait_match = re.search(r'WAIT_(\\d+)', err_str)
+                wait_sec = int(wait_match.group(1)) if wait_match else 5
+                print(f"⏳ Telegram rate pause ({wait_sec}s), sleeping before resume...", flush=True)
+                await asyncio.sleep(wait_sec + 2)
+            except Exception as e:
+                print(f"⚠️ Retry {attempt+1}/10 on {fname}: {e}", flush=True)
+                await asyncio.sleep(4)
+            finally:
+                if success and os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+                        
+        # Gentle inter-file rest to keep Telegram MTProto happy
+        await asyncio.sleep(1.0)
+        
     total_gb = stats["bytes"] / (1024 ** 3)
     print(f"\n🎉 BATCH SUMMARY: {stats['saved']} new files saved ({total_gb:.2f} GB transferred), {stats['skipped']} existing skipped.", flush=True)
     await client.disconnect()
