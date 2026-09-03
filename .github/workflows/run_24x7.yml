@@ -5,10 +5,6 @@ on:
     - cron: '*/30 * * * *'
   workflow_dispatch:
 
-concurrency:
-  group: tg-gdrive-downloader
-  cancel-in-progress: false
-
 permissions: write-all
 
 jobs:
@@ -33,12 +29,7 @@ jobs:
       - name: Run Telegram to Google Drive Pipeline
         env:
           PYTHONUNBUFFERED: "1"
-          TG_API_ID: ${{ secrets.TG_API_ID }}
-          TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
-          TG_GROUP_ID: ${{ secrets.TG_GROUP_ID }}
-          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
-          GDRIVE_ROOT_FOLDER_ID: ${{ secrets.GDRIVE_ROOT_FOLDER_ID }}
         run: |
           python -u downloader.py
 
