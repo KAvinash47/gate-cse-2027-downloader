@@ -36,11 +36,3 @@ jobs:
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
         run: |
           python -u downloader.py
-
-      - name: Auto Retrigger Next Workflow
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "🔄 Ensuring 24x7 continuous loop via GitHub Actions API..."
-          gh workflow run run_24x7.yml || echo "Auto-trigger queued via cron schedule."
