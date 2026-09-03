@@ -153,8 +153,12 @@ async def run():
     entity = await client.get_entity(GROUP_ID)
     print(f"🔗 Connected to Telegram Group: {entity.title}")
     
-    topics = await client(functions.messages.GetForumTopicsRequest(peer=entity, offset_date=None, offset_id=0, offset_topic=0, limit=50))
-    all_targets = [(t.id, t.title) for t in topics.topics] + [(None, "General")]
+    try:
+        topics = await client(functions.channels.GetForumTopicsRequest(channel=entity, offset_date=None, offset_id=0, offset_topic=0, limit=50))
+        all_targets = [(t.id, t.title) for t in topics.topics] + [(None, "General")]
+    except Exception as e:
+        print(f"⚠️ Could not fetch forum topics directly ({e}), fallback to full stream scan...")
+        all_targets = [(None, "General")]
     
     print("\n🔍 Scanning messages across all topics...")
     all_files = []
