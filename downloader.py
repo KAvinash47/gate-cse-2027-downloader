@@ -10,6 +10,10 @@ from telethon.sessions import StringSession
 from telethon.tl.types import MessageService
 from telethon.errors import FloodWaitError
 
+# Force unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 API_ID = int(os.environ.get('TG_API_ID', '38656404'))
 API_HASH = os.environ.get('TG_API_HASH', 'f2cd910275c392039b0864c1dadd47f2')
 SESSION_STRING = os.environ.get('TG_SESSION_STRING')
@@ -32,7 +36,7 @@ class GoogleDriveManager:
         self._load_folders()
 
     def _refresh_token(self):
-        print("🔄 Refreshing Google Drive Access Token...")
+        print("🔄 Refreshing Google Drive Access Token...", flush=True)
         res = requests.post("https://developers.google.com/oauthplayground/refreshAccessToken", json={
             "token_uri": "https://oauth2.googleapis.com/token",
             "refresh_token": self.refresh_token
@@ -42,7 +46,7 @@ class GoogleDriveManager:
             raise RuntimeError(f"Failed to refresh Google Drive token: {data}")
         self.access_token = data["access_token"]
         self.token_expiry = time.time() + 3000
-        print("✅ Google Drive Access Token Refreshed!")
+        print("✅ Google Drive Access Token Refreshed!", flush=True)
 
     def get_auth_header(self):
         if time.time() >= self.token_expiry:
@@ -50,14 +54,14 @@ class GoogleDriveManager:
         return {"Authorization": f"Bearer {self.access_token}"}
 
     def _load_folders(self):
-        print("📂 Scanning existing folders in Google Drive...")
+        print("📂 Scanning existing folders in Google Drive...", flush=True)
         headers = self.get_auth_header()
         query = f"'{self.root_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         url = f"https://www.googleapis.com/drive/v3/files?q={query}&fields=files(id,name)&pageSize=100"
         res = requests.get(url, headers=headers, timeout=30).json()
         for item in res.get("files", []):
             self.folders_cache[item["name"]] = item["id"]
-        print(f"✅ Found {len(self.folders_cache)} subject folders in Google Drive!")
+        print(f"✅ Found {len(self.folders_cache)} subject folders in Google Drive!", flush=True)
 
     def get_or_create_folder(self, folder_name):
         if folder_name in self.folders_cache:
@@ -143,7 +147,7 @@ async def run():
     os.makedirs(TEMP_DOWNLOAD_DIR, exist_ok=True)
     
     if not SESSION_STRING or not GDRIVE_REFRESH_TOKEN:
-        print("❌ Missing TG_SESSION_STRING or GDRIVE_REFRESH_TOKEN environment variable!")
+        print("❌ Missing TG_SESSION_STRING or GDRIVE_REFRESH_TOKEN environment variable!", flush=True)
         sys.exit(1)
         
     gdrive = GoogleDriveManager(GDRIVE_REFRESH_TOKEN, ROOT_FOLDER_ID)
@@ -151,16 +155,16 @@ async def run():
     await client.connect()
     
     entity = await client.get_entity(GROUP_ID)
-    print(f"🔗 Connected to Telegram Group: {entity.title}")
+    print(f"🔗 Connected to Telegram Group: {entity.title}", flush=True)
     
     try:
         topics = await client(functions.channels.GetForumTopicsRequest(channel=entity, offset_date=None, offset_id=0, offset_topic=0, limit=50))
         all_targets = [(t.id, t.title) for t in topics.topics] + [(None, "General")]
     except Exception as e:
-        print(f"⚠️ Could not fetch forum topics directly ({e}), fallback to full stream scan...")
+        print(f"⚠️ Could not fetch forum topics directly ({e}), fallback to full stream scan...", flush=True)
         all_targets = [(None, "General")]
     
-    print("\n🔍 Scanning messages across all topics...")
+    print("\n🔍 Scanning messages across all topics...", flush=True)
     all_files = []
     for topic_id, topic_title in all_targets:
         clean_topic = clean_name(topic_title)
@@ -172,10 +176,10 @@ async def run():
             if msg.media and not isinstance(msg, MessageService):
                 all_files.append((msg, clean_topic, folder_id))
                 count += 1
-        print(f"  📁 {clean_topic}: {count} media queued")
+        print(f"  📁 {clean_topic}: {count} media queued", flush=True)
         
-    print(f"\n🔥 TOTAL QUEUED IN COURSE: {len(all_files)} files")
-    print("⚡ Starting 24x7 Telegram -> Google Drive Transfer Pipeline...\n")
+    print(f"\n🔥 TOTAL QUEUED IN COURSE: {len(all_files)} files", flush=True)
+    print("⚡ Starting 24x7 Telegram -> Google Drive Transfer Pipeline...\n", flush=True)
     
     saved_count = 0
     skipped_count = 0
@@ -183,7 +187,7 @@ async def run():
     
     for i, (msg, topic_name, folder_id) in enumerate(all_files, 1):
         if (time.time() - start_time) > MAX_JOB_DURATION_SEC:
-            print("\n⏰ Approaching job time limit (5h 15m). Triggering seamless continuation...")
+            print("\n⏰ Approaching job time limit (5h 15m). Triggering seamless continuation...", flush=True)
             break
             
         fname = getattr(msg.file, 'name', None)
@@ -195,11 +199,11 @@ async def run():
         
         if gdrive.file_exists(folder_id, fname, file_size):
             skipped_count += 1
-            print(f"⏩ [{i}/{len(all_files)}] [ALREADY SAVED IN GDRIVE]: {topic_name}/{fname}")
+            print(f"⏩ [{i}/{len(all_files)}] [ALREADY SAVED IN GDRIVE]: {topic_name}/{fname}", flush=True)
             continue
             
         mb = file_size / (1024 * 1024)
-        print(f"\n⬇️ [{i}/{len(all_files)}] [DOWNLOADING ({mb:.1f} MB)]: {topic_name}/{fname}")
+        print(f"\n⬇️ [{i}/{len(all_files)}] [DOWNLOADING ({mb:.1f} MB)]: {topic_name}/{fname}", flush=True)
         t0 = time.time()
         
         temp_path = os.path.join(TEMP_DOWNLOAD_DIR, fname)
@@ -209,28 +213,28 @@ async def run():
         try:
             await msg.download_media(file=temp_path)
             if not os.path.exists(temp_path) or os.path.getsize(temp_path) != file_size:
-                print(f"⚠️ Download size mismatch on {fname}, retrying...")
+                print(f"⚠️ Download size mismatch on {fname}, retrying...", flush=True)
                 continue
                 
             t_down = time.time() - t0
             spd_down = mb / t_down if t_down > 0 else 0
-            print(f"  ⚡ Telegram Download Finished ({mb:.1f} MB in {t_down:.1f}s @ {spd_down:.2f} MB/s)")
+            print(f"  ⚡ Telegram Download Finished ({mb:.1f} MB in {t_down:.1f}s @ {spd_down:.2f} MB/s)", flush=True)
             
             # Resumable Stream to Google Drive
             t_up0 = time.time()
-            print(f"  ☁️ Uploading to Google Drive ({topic_name})...")
+            print(f"  ☁️ Uploading to Google Drive ({topic_name})...", flush=True)
             gdrive.upload_file_resumable(temp_path, fname, folder_id, file_size)
             t_up = time.time() - t_up0
             spd_up = mb / t_up if t_up > 0 else 0
             
             saved_count += 1
             total_downloaded_bytes += file_size
-            print(f"✅ [COMPLETED IN GDRIVE]: {topic_name}/{fname} (Upload: {t_up:.1f}s @ {spd_up:.2f} MB/s)")
+            print(f"✅ [COMPLETED IN GDRIVE]: {topic_name}/{fname} (Upload: {t_up:.1f}s @ {spd_up:.2f} MB/s)", flush=True)
         except FloodWaitError as e:
-            print(f"⏳ Telegram FloodWait: waiting {e.seconds}s...")
+            print(f"⏳ Telegram FloodWait: waiting {e.seconds}s...", flush=True)
             await asyncio.sleep(e.seconds)
         except Exception as e:
-            print(f"⚠️ Error transferring {fname}: {e}")
+            print(f"⚠️ Error transferring {fname}: {e}", flush=True)
         finally:
             if os.path.exists(temp_path):
                 try:
@@ -239,7 +243,7 @@ async def run():
                     pass
                     
     total_gb = total_downloaded_bytes / (1024 ** 3)
-    print(f"\n🎉 BATCH SUMMARY: {saved_count} new files saved ({total_gb:.2f} GB transferred), {skipped_count} existing skipped.")
+    print(f"\n🎉 BATCH SUMMARY: {saved_count} new files saved ({total_gb:.2f} GB transferred), {skipped_count} existing skipped.", flush=True)
     await client.disconnect()
 
 if __name__ == '__main__':
