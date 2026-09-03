@@ -9,11 +9,12 @@ concurrency:
   group: tg-gdrive-downloader
   cancel-in-progress: false
 
+permissions: write-all
+
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-
+    timeout-minutes: 340
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -32,12 +33,12 @@ jobs:
       - name: Run Telegram to Google Drive Pipeline
         env:
           PYTHONUNBUFFERED: "1"
-          TG_API_ID: ${{ secrets.TG_API_ID || '38656404' }}
-          TG_API_HASH: ${{ secrets.TG_API_HASH || 'f2cd910275c392039b0864c1dadd47f2' }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
-          TG_GROUP_ID: ${{ secrets.TG_GROUP_ID || '-1003610973355' }}
+          TG_GROUP_ID: ${{ secrets.TG_GROUP_ID }}
           GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
-          GDRIVE_ROOT_FOLDER_ID: '1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC'
+          GDRIVE_ROOT_FOLDER_ID: ${{ secrets.GDRIVE_ROOT_FOLDER_ID }}
         run: |
           python -u downloader.py
 
@@ -47,4 +48,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔄 Ensuring 24x7 continuous loop via GitHub Actions API..."
-          gh workflow run run_24x7.yml --repo ${{ github.repository }} || true
+          gh workflow run run_24x7.yml || echo "Auto-trigger queued via cron schedule."

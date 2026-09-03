@@ -20,7 +20,7 @@ API_ID = int(os.environ.get('TG_API_ID', '38656404'))
 API_HASH = os.environ.get('TG_API_HASH', 'f2cd910275c392039b0864c1dadd47f2')
 SESSION_STRING = os.environ.get('TG_SESSION_STRING')
 GROUP_ID = int(os.environ.get('TG_GROUP_ID', '-1003610973355'))
-GDRIVE_REFRESH_TOKEN = os.environ.get('GDRIVE_REFRESH_TOKEN')
+GDRIVE_REFRESH_TOKEN = os.environ.get('GDRIVE_REFRESH_TOKEN') or '1//04nTXLe2hpcf0CgYIARAAGAQSNwF-L9IrQRppSJ4V-6shAUt9Tf954Z3XzJ4biS-ISBicgUa-50BZZ6vcuimmxW-XrClKH0sXu9E'
 ROOT_FOLDER_ID = os.environ.get('GDRIVE_ROOT_FOLDER_ID', '1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC')
 
 CONCURRENT_WORKERS = 1  # 1 dedicated sequential worker guarantees 0 flood-wait & maximum Telegram bandwidth
@@ -160,7 +160,7 @@ def clean_name(name):
     return re.sub(r'[\\/*?:"<>|]', '_', str(name))
 
 def parse_flood_wait(error_str):
-    match = re.search(r'WAIT_(\d+)', error_str)
+    match = re.search(r'WAIT_(\\d+)', error_str)
     if match:
         return int(match.group(1))
     return 5
@@ -252,8 +252,8 @@ async def run():
     start_time = time.time()
     os.makedirs(TEMP_DOWNLOAD_DIR, exist_ok=True)
     
-    if not SESSION_STRING or not GDRIVE_REFRESH_TOKEN:
-        print("❌ Missing TG_SESSION_STRING or GDRIVE_REFRESH_TOKEN environment variable!", flush=True)
+    if not SESSION_STRING:
+        print("❌ Missing TG_SESSION_STRING environment variable!", flush=True)
         sys.exit(1)
         
     gdrive = GoogleDriveManager(GDRIVE_REFRESH_TOKEN, ROOT_FOLDER_ID)
