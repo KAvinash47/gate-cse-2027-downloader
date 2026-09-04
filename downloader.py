@@ -197,7 +197,7 @@ def clean_name(name):
     return re.sub(r'[\\/*?:"<>|]', '_', str(name))
 
 async def download_media_resumable(client, msg, temp_path, expected_size):
-    """Download Telegram file chunk-by-chunk with automatic resume and FastTelethon acceleration."""
+    """Download Telegram media file chunk-by-chunk with robust automatic resume and live progress."""
     if not client.is_connected():
         print("🔄 Reconnecting Telegram MTProto socket...", flush=True)
         await client.connect()
@@ -206,26 +206,52 @@ async def download_media_resumable(client, msg, temp_path, expected_size):
     if current_size == expected_size and expected_size > 0:
         return True
 
-    # 1. FastTelethon parallel multi-connection download for large media
-    if FastTelethon and current_size == 0 and expected_size > (5 * 1024 * 1024):
+    REQ_SIZE = 524288  # 512 KB safe MTProto chunk
+    last_log_time = time.time()
+    consecutive_errors = 0
+
+    while current_size < expected_size:
         try:
-            with open(temp_path, "wb") as f:
-                await FastTelethon.download_file(client, msg.media, f)
-            if os.path.exists(temp_path) and os.path.getsize(temp_path) == expected_size:
-                return True
+            mode = "ab" if current_size > 0 else "wb"
+            with open(temp_path, mode) as f:
+                async for chunk in client.iter_download(msg.media, offset=current_size, request_size=REQ_SIZE):
+                    f.write(chunk)
+                    f.flush()
+                    current_size += len(chunk)
+                    consecutive_errors = 0
+                    
+                    now = time.time()
+                    if now - last_log_time >= 5 or current_size >= expected_size:
+                        pct = (current_size / expected_size * 100) if expected_size > 0 else 0
+                        cur_mb = current_size / (1024 * 1024)
+                        exp_mb = expected_size / (1024 * 1024)
+                        print(f"  ⏳ Progress: {cur_mb:.1f}/{exp_mb:.1f} MB ({pct:.1f}%)", flush=True)
+                        last_log_time = now
+        except FloodWaitError as e:
+            consecutive_errors += 1
+            print(f"  ⏳ Telegram FloodWait: sleeping {e.seconds}s before resuming...", flush=True)
+            await asyncio.sleep(e.seconds + 2)
+        except RPCError as e:
+            consecutive_errors += 1
+            err_str = str(e)
+            wait_match = re.search(r'WAIT_(\d+)', err_str)
+            wait_sec = int(wait_match.group(1)) if wait_match else 10
+            print(f"  ⏳ Telegram rate pause ({wait_sec}s), resuming...", flush=True)
+            await asyncio.sleep(wait_sec + 2)
         except Exception as e:
-            print(f"  ℹ️ FastTelethon fallback to resilient chunk stream: {e}", flush=True)
+            consecutive_errors += 1
+            print(f"  ⚠️ Chunk interrupted at {current_size/(1024*1024):.1f} MB: {e}", flush=True)
+            if not client.is_connected():
+                try:
+                    await client.connect()
+                except Exception:
+                    pass
+            await asyncio.sleep(min(2 ** consecutive_errors, 20))
 
-    # 2. Resilient chunk download with resume
-    current_size = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
-    mode = "ab" if current_size > 0 else "wb"
-    if current_size > 0:
-        print(f"  🔁 Resuming download from offset {current_size / (1024*1024):.1f} MB...", flush=True)
+        if consecutive_errors >= 25:
+            print(f"❌ Aborting file after 25 consecutive fatal errors.", flush=True)
+            return False
 
-    with open(temp_path, mode) as f:
-        async for chunk in client.iter_download(msg.media, offset=current_size, request_size=1048576):
-            f.write(chunk)
-            
     return os.path.exists(temp_path) and os.path.getsize(temp_path) == expected_size
 
 async def run():
@@ -298,59 +324,31 @@ async def run():
         t0 = time.time()
         
         temp_path = os.path.join(TEMP_DOWNLOAD_DIR, f"temp_{clean_name(fname)}")
-        success = False
         
-        for attempt in range(40):
-            try:
-                ok = await download_media_resumable(client, msg, temp_path, file_size)
-                if ok:
-                    t_down = time.time() - t0
-                    spd_down = mb / t_down if t_down > 0 else 0
-                    print(f"  ⚡ Downloaded ({mb:.1f} MB in {t_down:.1f}s @ {spd_down:.2f} MB/s)", flush=True)
-                    
-                    # Resumable Stream to Google Drive
-                    t_up0 = time.time()
-                    print(f"  ☁️ Uploading to Google Drive ({topic_name})...", flush=True)
-                    gdrive.upload_file_resumable(temp_path, fname, folder_id, file_size)
-                    t_up = time.time() - t_up0
-                    spd_up = mb / t_up if t_up > 0 else 0
-                    
-                    stats["saved"] += 1
-                    stats["bytes"] += file_size
-                    print(f"✅ [SAVED TO GDRIVE]: {topic_name}/{fname} (Up: {t_up:.1f}s @ {spd_up:.2f} MB/s)", flush=True)
-                    success = True
-                    break
-                else:
-                    cur_sz = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
-                    print(f"⚠️ Partial download ({cur_sz}/{file_size} bytes), resuming in 3s...", flush=True)
-                    await asyncio.sleep(3)
-            except FloodWaitError as e:
-                print(f"⏳ FloodWait ({e.seconds}s), sleeping before resume...", flush=True)
-                await asyncio.sleep(e.seconds + 2)
-            except RPCError as e:
-                err_str = str(e)
-                wait_match = re.search(r'WAIT_(\d+)', err_str)
-                wait_sec = int(wait_match.group(1)) if wait_match else 10
-                print(f"⏳ Telegram rate pause ({wait_sec}s), sleeping before resume...", flush=True)
-                await asyncio.sleep(wait_sec + 2)
-            except Exception as e:
-                print(f"⚠️ Retry {attempt+1}/40 on {fname}: {e}", flush=True)
-                if not client.is_connected():
-                    try:
-                        print("🔄 Reconnecting Telegram MTProto socket...", flush=True)
-                        await client.connect()
-                    except Exception:
-                        pass
-                await asyncio.sleep(4)
-            finally:
-                if success and os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except Exception:
-                        pass
-
-        if not success:
-            print(f"❌ Failed {fname} after 40 attempts, moving to next file to avoid blocking pipeline.", flush=True)
+        ok = await download_media_resumable(client, msg, temp_path, file_size)
+        if ok:
+            t_down = time.time() - t0
+            spd_down = mb / t_down if t_down > 0 else 0
+            print(f"  ⚡ Download complete ({mb:.1f} MB in {t_down:.1f}s @ {spd_down:.2f} MB/s)", flush=True)
+            
+            # Resumable Stream to Google Drive
+            t_up0 = time.time()
+            print(f"  ☁️ Uploading to Google Drive ({topic_name})...", flush=True)
+            gdrive.upload_file_resumable(temp_path, fname, folder_id, file_size)
+            t_up = time.time() - t_up0
+            spd_up = mb / t_up if t_up > 0 else 0
+            
+            stats["saved"] += 1
+            stats["bytes"] += file_size
+            print(f"✅ [SAVED TO GDRIVE]: {topic_name}/{fname} (Up: {t_up:.1f}s @ {spd_up:.2f} MB/s)", flush=True)
+            
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+        else:
+            print(f"❌ Failed transfer for {fname}, moving to next file.", flush=True)
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
