@@ -188,11 +188,16 @@ class GoogleDriveManager:
             self.files_cache[folder_id][file_name] = file_size
         return True
 
+try:
+    import FastTelethon
+except ImportError:
+    FastTelethon = None
+
 def clean_name(name):
     return re.sub(r'[\\/*?:"<>|]', '_', str(name))
 
 async def download_media_resumable(client, msg, temp_path, expected_size):
-    """Download Telegram file chunk-by-chunk with automatic resume and auto-reconnect."""
+    """Download Telegram file chunk-by-chunk with automatic resume and FastTelethon acceleration."""
     if not client.is_connected():
         print("🔄 Reconnecting Telegram MTProto socket...", flush=True)
         await client.connect()
@@ -201,13 +206,24 @@ async def download_media_resumable(client, msg, temp_path, expected_size):
     if current_size == expected_size and expected_size > 0:
         return True
 
-    # If file was partially downloaded, resume from current_size
+    # 1. FastTelethon parallel multi-connection download for large media
+    if FastTelethon and current_size == 0 and expected_size > (5 * 1024 * 1024):
+        try:
+            with open(temp_path, "wb") as f:
+                await FastTelethon.download_file(client, msg.media, f)
+            if os.path.exists(temp_path) and os.path.getsize(temp_path) == expected_size:
+                return True
+        except Exception as e:
+            print(f"  ℹ️ FastTelethon fallback to resilient chunk stream: {e}", flush=True)
+
+    # 2. Resilient chunk download with resume
+    current_size = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
     mode = "ab" if current_size > 0 else "wb"
     if current_size > 0:
         print(f"  🔁 Resuming download from offset {current_size / (1024*1024):.1f} MB...", flush=True)
 
     with open(temp_path, mode) as f:
-        async for chunk in client.iter_download(msg.media, offset=current_size, request_size=524288):
+        async for chunk in client.iter_download(msg.media, offset=current_size, request_size=1048576):
             f.write(chunk)
             
     return os.path.exists(temp_path) and os.path.getsize(temp_path) == expected_size
@@ -284,7 +300,7 @@ async def run():
         temp_path = os.path.join(TEMP_DOWNLOAD_DIR, f"temp_{clean_name(fname)}")
         success = False
         
-        for attempt in range(6):
+        for attempt in range(40):
             try:
                 ok = await download_media_resumable(client, msg, temp_path, file_size)
                 if ok:
@@ -318,14 +334,14 @@ async def run():
                 print(f"⏳ Telegram rate pause ({wait_sec}s), sleeping before resume...", flush=True)
                 await asyncio.sleep(wait_sec + 2)
             except Exception as e:
-                print(f"⚠️ Retry {attempt+1}/6 on {fname}: {e}", flush=True)
+                print(f"⚠️ Retry {attempt+1}/40 on {fname}: {e}", flush=True)
                 if not client.is_connected():
                     try:
                         print("🔄 Reconnecting Telegram MTProto socket...", flush=True)
                         await client.connect()
                     except Exception:
                         pass
-                await asyncio.sleep(5)
+                await asyncio.sleep(4)
             finally:
                 if success and os.path.exists(temp_path):
                     try:
@@ -334,7 +350,7 @@ async def run():
                         pass
 
         if not success:
-            print(f"❌ Failed {fname} after 6 attempts, moving to next file to avoid blocking pipeline.", flush=True)
+            print(f"❌ Failed {fname} after 40 attempts, moving to next file to avoid blocking pipeline.", flush=True)
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
