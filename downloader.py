@@ -26,7 +26,30 @@ GDRIVE_REFRESH_TOKEN = base64.b64decode(FRESH_TOKEN_B64).decode()
 ROOT_FOLDER_ID = "1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC"
 
 TEMP_DOWNLOAD_DIR = '/tmp/tg_downloads' if os.name != 'nt' else 'C:\\temp\\tg_downloads'
-MAX_JOB_DURATION_SEC = 5 * 3600 + 15 * 60  # 5 hours 15 mins (safely under 6 hr limit)
+MAX_JOB_DURATION_SEC = 5 * 3600 + 20 * 60  # 5 hours 20 mins
+
+# Priority ranking for subjects (DBMS, Algo, TOC first!)
+PRIORITY_KEYWORDS = [
+    ["dbms", "database"],
+    ["algo", "algorithm"],
+    ["toc", "theory of computation", "automata"],
+    ["data structure", "ds"],
+    ["operating system", "os"],
+    ["compiler"],
+    ["coa", "architecture"],
+    ["engineering mathematics", "math"],
+    ["discrete", "dm"],
+    ["deep learning", "dl"],
+    ["cn", "network"],
+    ["aptitude", "reasoning"],
+]
+
+def get_topic_priority(topic_title):
+    title_lower = str(topic_title).lower()
+    for rank, keywords in enumerate(PRIORITY_KEYWORDS):
+        if any(k in title_lower for k in keywords):
+            return rank
+    return 999
 
 class GoogleDriveManager:
     def __init__(self, refresh_token, root_folder_id):
@@ -208,8 +231,17 @@ async def run():
     except Exception as e:
         print(f"⚠️ Fallback to general scan ({e})", flush=True)
         all_targets = [(None, "General")]
+
+    # Sort topics by priority (Database/DBMS, Algo, TOC first!)
+    all_targets.sort(key=lambda t: (get_topic_priority(t[1]), t[1]))
     
-    print("\n🔍 Scanning messages across all topics...", flush=True)
+    print("\n📋 Topic Execution Order (Priority Weighted):", flush=True)
+    for idx, (tid, title) in enumerate(all_targets, 1):
+        p = get_topic_priority(title)
+        badge = "🔥 [PRIORITY 1]" if p in [0, 1, 2] else "📌 [PRIORITY 2]" if p < 10 else "📁"
+        print(f"  {idx}. {badge} {title}", flush=True)
+    
+    print("\n🔍 Scanning messages across all topics in priority order...", flush=True)
     all_files = []
     for topic_id, topic_title in all_targets:
         clean_topic = clean_name(topic_title)
@@ -252,7 +284,7 @@ async def run():
         temp_path = os.path.join(TEMP_DOWNLOAD_DIR, f"temp_{clean_name(fname)}")
         success = False
         
-        for attempt in range(15):
+        for attempt in range(6):
             try:
                 ok = await download_media_resumable(client, msg, temp_path, file_size)
                 if ok:
@@ -281,25 +313,33 @@ async def run():
                 await asyncio.sleep(e.seconds + 2)
             except RPCError as e:
                 err_str = str(e)
-                wait_match = re.search(r'WAIT_(\\d+)', err_str)
-                wait_sec = int(wait_match.group(1)) if wait_match else 5
+                wait_match = re.search(r'WAIT_(\d+)', err_str)
+                wait_sec = int(wait_match.group(1)) if wait_match else 10
                 print(f"⏳ Telegram rate pause ({wait_sec}s), sleeping before resume...", flush=True)
                 await asyncio.sleep(wait_sec + 2)
             except Exception as e:
-                print(f"⚠️ Retry {attempt+1}/15 on {fname}: {e}", flush=True)
+                print(f"⚠️ Retry {attempt+1}/6 on {fname}: {e}", flush=True)
                 if not client.is_connected():
                     try:
                         print("🔄 Reconnecting Telegram MTProto socket...", flush=True)
                         await client.connect()
                     except Exception:
                         pass
-                await asyncio.sleep(4)
+                await asyncio.sleep(5)
             finally:
                 if success and os.path.exists(temp_path):
                     try:
                         os.remove(temp_path)
                     except Exception:
                         pass
+
+        if not success:
+            print(f"❌ Failed {fname} after 6 attempts, moving to next file to avoid blocking pipeline.", flush=True)
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
                         
         # Gentle inter-file rest to keep Telegram MTProto happy
         await asyncio.sleep(1.0)
