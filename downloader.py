@@ -22,6 +22,9 @@ API_HASH = "f2cd910275c392039b0864c1dadd47f2"
 SESSION_STRING = os.environ.get('TG_SESSION_STRING') or "1BVtsOK8BuzSacJ1ukb94zzaRtQjlKX1KHOCXzYe7iZtqCjES8GPNAc3pr81ZyN0fumPpRUYpQgIZCVMDePfwu5gbFGsHyLYPx-EXIn0bgwSUUwFeBcpAf3n486bkFB60ir8i0y_APLorUYEyPBKTal2922cfdzsr34nBJDeck8QEvUIS1PsBMXBiX079-eujqWJysU8ci-19lEhUYXejREU3M3hVQcocyRWOu8JQoym_s1XIeOioVnjO3CAWKZ6av2to5RTemmPrPX7kyywXnzu47FS7p-yEhov83mcgA59nOftoU0g0jsltFEuUuGKTViwoElsZ8lvMmi4aXEDBq50NPamL1cs="
 GROUP_ID = -1003610973355
 GDRIVE_REFRESH_TOKEN = os.environ.get('GDRIVE_REFRESH_TOKEN')
+GDRIVE_CLIENT_ID = os.environ.get('GDRIVE_CLIENT_ID', '')
+GDRIVE_CLIENT_SECRET = os.environ.get('GDRIVE_CLIENT_SECRET', '')
+
 if not GDRIVE_REFRESH_TOKEN:
     raise ValueError("GDRIVE_REFRESH_TOKEN environment variable / secret is required.")
 ROOT_FOLDER_ID = "1LjiY-Y-68Jvcp8Bs62RuNjJDJwD90OzC"
@@ -53,9 +56,11 @@ def get_topic_priority(topic_title):
     return 999
 
 class GoogleDriveManager:
-    def __init__(self, refresh_token, root_folder_id):
+    def __init__(self, refresh_token, root_folder_id, client_id=None, client_secret=None):
         self.refresh_token = refresh_token
         self.root_folder_id = root_folder_id
+        self.client_id = client_id or GDRIVE_CLIENT_ID
+        self.client_secret = client_secret or GDRIVE_CLIENT_SECRET
         self.access_token = None
         self.token_expiry = 0
         self.folders_cache = {}
@@ -71,11 +76,21 @@ class GoogleDriveManager:
 
     def _refresh_token(self):
         print("🔄 Refreshing Google Drive Access Token...", flush=True)
-        res = self.session.post("https://developers.google.com/oauthplayground/refreshAccessToken", json={
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "refresh_token": self.refresh_token
-        }, timeout=30)
-        data = res.json()
+        if self.client_id and self.client_secret:
+            res = self.session.post("https://oauth2.googleapis.com/token", data={
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "refresh_token": self.refresh_token,
+                "grant_type": "refresh_token"
+            }, timeout=30)
+            data = res.json()
+        else:
+            res = self.session.post("https://developers.google.com/oauthplayground/refreshAccessToken", json={
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "refresh_token": self.refresh_token
+            }, timeout=30)
+            data = res.json()
+
         if "access_token" not in data:
             raise RuntimeError(f"Failed to refresh Google Drive token: {data}")
         self.access_token = data["access_token"]
