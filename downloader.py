@@ -17,9 +17,11 @@ from telethon.errors import FloodWaitError, RpcCallFailError, RPCError
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
-API_ID = 38656404
-API_HASH = "f2cd910275c392039b0864c1dadd47f2"
-SESSION_STRING = os.environ.get('TG_SESSION_STRING') or "1BVtsOK8BuzSacJ1ukb94zzaRtQjlKX1KHOCXzYe7iZtqCjES8GPNAc3pr81ZyN0fumPpRUYpQgIZCVMDePfwu5gbFGsHyLYPx-EXIn0bgwSUUwFeBcpAf3n486bkFB60ir8i0y_APLorUYEyPBKTal2922cfdzsr34nBJDeck8QEvUIS1PsBMXBiX079-eujqWJysU8ci-19lEhUYXejREU3M3hVQcocyRWOu8JQoym_s1XIeOioVnjO3CAWKZ6av2to5RTemmPrPX7kyywXnzu47FS7p-yEhov83mcgA59nOftoU0g0jsltFEuUuGKTViwoElsZ8lvMmi4aXEDBq50NPamL1cs="
+API_ID = int(os.environ.get('TG_API_ID', 38656404))
+API_HASH = os.environ.get('TG_API_HASH', "f2cd910275c392039b0864c1dadd47f2")
+SESSION_STRING = os.environ.get('TG_SESSION_STRING')
+if not SESSION_STRING:
+    raise ValueError("TG_SESSION_STRING environment variable / secret is required.")
 GROUP_ID = -1003610973355
 GDRIVE_REFRESH_TOKEN = os.environ.get('GDRIVE_REFRESH_TOKEN')
 GDRIVE_CLIENT_ID = os.environ.get('GDRIVE_CLIENT_ID', '')
