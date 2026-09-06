@@ -2,12 +2,12 @@ name: 24x7 Telegram to Google Drive Downloader
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 */4 * * *'
   workflow_dispatch:
 
 concurrency:
   group: tg-gdrive-downloader
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions: write-all
 

@@ -177,7 +177,7 @@ class GoogleDriveManager:
             raise RuntimeError(f"Failed to initiate resumable upload: {init_res.text}")
         
         upload_location = init_res.headers["Location"]
-        chunk_size = 5 * 1024 * 1024  # 5 MB safe chunk
+        chunk_size = 10 * 1024 * 1024  # 10 MB fast upload chunk
         
         with open(file_path, "rb") as f:
             offset = 0
@@ -222,7 +222,7 @@ async def download_media_resumable(client, msg, temp_path, expected_size):
     if current_size == expected_size and expected_size > 0:
         return True
 
-    REQ_SIZE = 524288  # 512 KB safe MTProto chunk
+    REQ_SIZE = 1048576  # 1 MB fast MTProto chunk
     last_log_time = time.time()
     consecutive_errors = 0
 
@@ -234,7 +234,7 @@ async def download_media_resumable(client, msg, temp_path, expected_size):
                     f.write(chunk)
                     f.flush()
                     current_size += len(chunk)
-                    consecutive_errors = 0
+                    consecutive_errors = 0  # reset on active progress
                     
                     now = time.time()
                     if now - last_log_time >= 5 or current_size >= expected_size:
@@ -262,10 +262,10 @@ async def download_media_resumable(client, msg, temp_path, expected_size):
                     await client.connect()
                 except Exception:
                     pass
-            await asyncio.sleep(min(2 ** consecutive_errors, 20))
+            await asyncio.sleep(min(2 ** consecutive_errors, 25))
 
-        if consecutive_errors >= 25:
-            print(f"❌ Aborting file after 25 consecutive fatal errors.", flush=True)
+        if consecutive_errors >= 40:
+            print(f"❌ Aborting file after 40 consecutive fatal errors.", flush=True)
             return False
 
     return os.path.exists(temp_path) and os.path.getsize(temp_path) == expected_size
@@ -276,8 +276,8 @@ async def run():
     
     gdrive = GoogleDriveManager(GDRIVE_REFRESH_TOKEN, ROOT_FOLDER_ID)
     
-    # Initialize Telethon with automatic 120s flood sleep handling
-    client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, flood_sleep_threshold=120)
+    # Initialize Telethon with automatic 300s flood sleep handling
+    client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, flood_sleep_threshold=300)
     await client.connect()
     
     entity = await client.get_entity(GROUP_ID)
