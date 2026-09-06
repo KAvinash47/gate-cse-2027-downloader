@@ -215,62 +215,43 @@ def clean_name(name):
     return re.sub(r'[\\/*?:"<>|]', '_', str(name))
 
 async def download_media_resumable(client, msg, temp_path, expected_size):
-    """Download Telegram media file chunk-by-chunk with robust automatic resume and live progress."""
+    """Download Telegram media file using native MTProto downloader with progress callback."""
     if not client.is_connected():
         print("🔄 Reconnecting Telegram MTProto socket...", flush=True)
         await client.connect()
 
-    current_size = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
-    if current_size == expected_size and expected_size > 0:
+    if os.path.exists(temp_path) and os.path.getsize(temp_path) == expected_size and expected_size > 0:
         return True
 
-    REQ_SIZE = 1048576  # 1 MB fast MTProto chunk
-    last_log_time = time.time()
-    consecutive_errors = 0
+    last_log_time = [time.time()]
 
-    while current_size < expected_size:
+    def progress_callback(current, total):
+        now = time.time()
+        if now - last_log_time[0] >= 4 or current >= total:
+            pct = (current / total * 100) if total > 0 else 0
+            cur_mb = current / (1024 * 1024)
+            tot_mb = total / (1024 * 1024)
+            print(f"  ⏳ Progress: {cur_mb:.1f}/{tot_mb:.1f} MB ({pct:.1f}%)", flush=True)
+            last_log_time[0] = now
+
+    for attempt in range(5):
         try:
-            mode = "ab" if current_size > 0 else "wb"
-            with open(temp_path, mode) as f:
-                async for chunk in client.iter_download(msg.media, offset=current_size, request_size=REQ_SIZE):
-                    f.write(chunk)
-                    f.flush()
-                    current_size += len(chunk)
-                    consecutive_errors = 0  # reset on active progress
-                    
-                    now = time.time()
-                    if now - last_log_time >= 5 or current_size >= expected_size:
-                        pct = (current_size / expected_size * 100) if expected_size > 0 else 0
-                        cur_mb = current_size / (1024 * 1024)
-                        exp_mb = expected_size / (1024 * 1024)
-                        print(f"  ⏳ Progress: {cur_mb:.1f}/{exp_mb:.1f} MB ({pct:.1f}%)", flush=True)
-                        last_log_time = now
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            res = await client.download_media(msg.media, file=temp_path, progress_callback=progress_callback)
+            if res and os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                return True
         except FloodWaitError as e:
-            consecutive_errors += 1
-            print(f"  ⏳ Telegram FloodWait: sleeping {e.seconds}s before resuming...", flush=True)
+            print(f"  ⏳ Telegram FloodWait: sleeping {e.seconds}s...", flush=True)
             await asyncio.sleep(e.seconds + 2)
         except RPCError as e:
-            consecutive_errors += 1
-            err_str = str(e)
-            wait_match = re.search(r'WAIT_(\d+)', err_str)
-            wait_sec = int(wait_match.group(1)) if wait_match else 10
-            print(f"  ⏳ Telegram rate pause ({wait_sec}s), resuming...", flush=True)
-            await asyncio.sleep(wait_sec + 2)
+            print(f"  ⚠️ Telegram RPC error (attempt {attempt+1}): {e}", flush=True)
+            await asyncio.sleep(5)
         except Exception as e:
-            consecutive_errors += 1
-            print(f"  ⚠️ Chunk interrupted at {current_size/(1024*1024):.1f} MB: {e}", flush=True)
-            if not client.is_connected():
-                try:
-                    await client.connect()
-                except Exception:
-                    pass
-            await asyncio.sleep(min(2 ** consecutive_errors, 25))
+            print(f"  ⚠️ Download error (attempt {attempt+1}): {e}", flush=True)
+            await asyncio.sleep(3 * (attempt + 1))
 
-        if consecutive_errors >= 40:
-            print(f"❌ Aborting file after 40 consecutive fatal errors.", flush=True)
-            return False
-
-    return os.path.exists(temp_path) and os.path.getsize(temp_path) == expected_size
+    return os.path.exists(temp_path) and os.path.getsize(temp_path) > 0
 
 async def run():
     start_time = time.time()
